@@ -196,6 +196,26 @@ def get_article_content(entry) -> str:
     return ""
 
 
+def insert_article(conn, data: dict):
+    with conn.cursor() as cur:
+        cur.execute("""
+            INSERT INTO articles
+                (url, title, source, category, published_at,
+                 summary, importance, tags, technologies, actions,
+                 raw_content, technique, cve, cvss, versions_affectees)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            ON CONFLICT (url) DO NOTHING
+        """, (
+            data["url"], data["title"], data["source"],
+            data.get("categorie", "Autre"), data.get("published_at"),
+            data.get("resume"), data.get("importance", 1),
+            data.get("tags", []), data.get("technologies", []),
+            data.get("actions"), data.get("raw_content", ""),
+            data.get("technique"), data.get("cve"),
+            data.get("cvss"), data.get("versions_affectees"),
+        ))
+        conn.commit()
+
 # ─── Programme principal ──────────────────────────────────────────────────────
 
 def main():
