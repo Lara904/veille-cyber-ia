@@ -1,4 +1,4 @@
 scripts/
 .github/
-requirements.txt
+/requirements.txt
 sql/
