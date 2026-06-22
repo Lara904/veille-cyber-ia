@@ -50,29 +50,28 @@ RSS_FEEDS = {
 
 # ─── Prompt d'analyse ─────────────────────────────────────────────────────────
 
-PROMPT_TEMPLATE = """Tu es un assistant de veille technique spécialisé en cybersécurité et IA.
-Analyse cet article et réponds UNIQUEMENT avec un objet JSON valide.
-Aucun texte avant ou après le JSON. Aucun bloc markdown.
+PROMPT_TEMPLATE = """Tu es un expert en cybersécurité et IA. Analyse cet article.
+Réponds UNIQUEMENT avec un JSON valide, sans texte avant ou après.
 
 {{
-  "resume": "3 à 5 phrases claires, en français",
+  "resume": "Décris : QUI est vulnérable, COMMENT fonctionne l'attaque techniquement (vecteur, mécanisme d'exploitation, type : RCE/SQLi/XSS/buffer overflow/etc.), et QUEL est l'impact concret",
+  "technique": "Détail technique : type de vulnérabilité, condition d'exploitation, privilèges requis, interaction utilisateur nécessaire. Null si pas de faille.",
+  "cve": "CVE-XXXX-XXXX si mentionné, sinon null",
+  "cvss": "Score numérique CVSS si mentionné, sinon null",
+  "versions_affectees": "Produits et versions concernés, sinon null",
   "importance": 3,
   "categorie": "CVE|Zero-Day|Threat Intel|Ransomware|APT|Cloud Security|LLM|Open Source AI|Agent IA|Paper|Outil|Réglementation|Autre",
-  "technologies": ["tech1", "tech2"],
-  "tags": ["tag1", "tag2", "tag3"],
-  "actions": "Action concrète recommandée, ou null si aucune"
+  "technologies": ["tech1"],
+  "tags": ["tag1", "tag2"],
+  "actions": "Action concrète (patcher vers X.X, isoler le service, bloquer le port...) ou null"
 }}
 
-Barème d'importance :
-1 = Information générale, faible impact immédiat
-2 = Sujet intéressant, à suivre
-3 = Important, mérite attention
-4 = Critique, action recommandée (CVE élevée, campagne active, outil offensif majeur)
-5 = Alerte maximale (CVE CVSS≥9, 0-day exploité activement, APT ciblant infrastructure critique)
+Importance : 1=info, 2=intéressant, 3=important, 4=critique, 5=alerte max (CVSS≥9, 0-day actif)
 
-Titre    : {title}
-Source   : {source}
-Contenu  : {content}"""
+Titre   : {title}
+Source  : {source}
+Contenu : {content}"""
+
 
 # ─── Fonctions utilitaires ────────────────────────────────────────────────────
 
