@@ -1,2 +1,2 @@
 [tool.vercel]
-entrypoint = api.articles:handler"
+entrypoint = "api/app.py"
