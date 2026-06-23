@@ -249,8 +249,8 @@ def telegram():
                 title       ILIKE %s
                 OR summary  ILIKE %s
                 OR technique ILIKE %s
-                OR %s = ANY(tags)
-                OR %s = ANY(technologies)
+                OR tags::text ILIKE %s
+                OR technologies::text ILIKE %s
             )
             AND collected_at > NOW() - INTERVAL '30 days'
             ORDER BY importance DESC, collected_at DESC
@@ -259,8 +259,8 @@ def telegram():
             f"%{question}%",
             f"%{question}%",
             f"%{question}%",
-            question.lower(),
-            question.lower(),
+            f"%{question}%",
+            f"%{question}%",
         ))
 
         if not rows:
