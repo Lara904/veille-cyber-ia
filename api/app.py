@@ -256,7 +256,7 @@ def telegram():
             ORDER BY importance DESC, collected_at DESC
             LIMIT 5
         """, (
-             """, (f"%{question}%",) * 5)
+             (f"%{question}%",) * 5)
         ))
 
         if not rows:
