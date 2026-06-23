@@ -1,11 +1,12 @@
 from flask import Flask, jsonify, request
-import os, psycopg2, requests, hmac, hashlib
+import os, psycopg2, requests
 
 app = Flask(__name__)
 
 DATABASE_URL       = os.environ.get("DATABASE_URL", "")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 GROQ_API_KEY       = os.environ.get("GROQ_API_KEY", "")
+
 
 # ─── Helpers DB ───────────────────────────────────────────────────────────────
 
@@ -22,21 +23,16 @@ def db_query(sql, params=()):
 # ─── Helpers Telegram ─────────────────────────────────────────────────────────
 
 def send_tg(chat_id, text):
-    """Envoie un message Markdown en découpant si besoin"""
     chunks = [text[i:i+4000] for i in range(0, len(text), 4000)]
     for chunk in chunks:
         try:
             r = requests.post(
                 f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
-                json={
-                    "chat_id":    chat_id,
-                    "text":       chunk,
-                    "parse_mode": "Markdown",
-                    "disable_web_page_preview": True,
-                },
+                json={"chat_id": chat_id, "text": chunk,
+                      "parse_mode": "Markdown",
+                      "disable_web_page_preview": True},
                 timeout=10,
             )
-            # Si le Markdown plante, renvoyer en texte brut
             if not r.json().get("ok"):
                 requests.post(
                     f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
@@ -80,18 +76,29 @@ def telegram():
     if not chat_id or not text:
         return "OK", 200
 
+    try:
+        _handle(chat_id, text)
+    except Exception as e:
+        print(f"handle error: {e}")
+        send_tg(chat_id, f"⚠️ Erreur interne : {e}")
+
+    return "OK", 200
+
+
+def _handle(chat_id, text):
+
     # ── /start ou /help ────────────────────────────────────────────────────
     if text in ("/start", "/help"):
         send_tg(chat_id,
             "*Commandes disponibles :*\n\n"
             "/critiques — Articles critiques (7j)\n"
-            "/services — Incidents sur tes services (GitHub, Docker, Gmail…)\n"
+            "/services — Incidents sur tes services\n"
             "/deeplearning — Derniers papers DL / JEPA / modèles\n"
             "/search [terme] — Rechercher un sujet\n"
             "/stats — Statistiques de la base\n"
             "/help — Cette aide\n\n"
             "💡 Tu peux aussi poser une question libre :\n"
-            "_\"Explique-moi la faille Apache mentionnée\"\n"
+            "_\"Explique-moi la faille Apache\"\n"
             "\"C'est quoi JEPA de Meta ?\"\n"
             "\"Dernier incident GitHub ?\"_"
         )
@@ -121,10 +128,10 @@ def telegram():
                 lines.append(f"  🔗 {a['url']}")
             send_tg(chat_id, "\n".join(lines))
 
-    # ── /services — incidents sur les services surveillés ──────────────────
+    # ── /services ──────────────────────────────────────────────────────────
     elif text == "/services":
         rows = db_query("""
-            SELECT title, source, importance, summary, url, collected_at
+            SELECT title, source, importance, summary, url
             FROM articles
             WHERE (
                 title ILIKE ANY(ARRAY[
@@ -133,7 +140,6 @@ def telegram():
                     '%france connect%','%ameli%','%impots%','%anssi%','%gouv.fr%',
                     '%service-public%'
                 ])
-                OR 'service-surveillé' = ANY(tags)
                 OR source ILIKE ANY(ARRAY[
                     '%github%','%docker%','%spotify%','%snap%','%anssi%','%cert%'
                 ])
@@ -143,9 +149,9 @@ def telegram():
             LIMIT 10
         """)
         if not rows:
-            send_tg(chat_id, "Aucun incident détecté sur tes services cette semaine. ✅")
+            send_tg(chat_id, "Aucun incident sur tes services cette semaine. ✅")
         else:
-            lines = ["🛠 *Incidents & actus — services surveillés (7j)*\n"]
+            lines = ["🛠 *Services surveillés — 7 derniers jours*\n"]
             for a in rows:
                 lines.append(f"• `[{a['importance']}/5]` *{a['title']}*")
                 lines.append(f"  _{a['source']}_")
@@ -154,14 +160,13 @@ def telegram():
                 lines.append(f"  🔗 {a['url']}")
             send_tg(chat_id, "\n".join(lines))
 
-    # ── /deeplearning — derniers papers DL, JEPA, modèles ─────────────────
+    # ── /deeplearning ──────────────────────────────────────────────────────
     elif text in ("/deeplearning", "/dl"):
         rows = db_query("""
             SELECT title, source, importance, summary, url, category
             FROM articles
             WHERE (
                 category IN ('Deep Learning','LLM','Paper','Open Source AI','Agent IA','JEPA')
-                OR 'deep-learning' = ANY(tags)
                 OR title ILIKE ANY(ARRAY[
                     '%deep learning%','%neural network%','%transformer%',
                     '%jepa%','%diffusion%','%llm%','%foundation model%',
@@ -180,7 +185,7 @@ def telegram():
         """)
         if not rows:
             send_tg(chat_id,
-                "Aucun paper / article deep learning cette semaine.\n"
+                "Aucun paper deep learning cette semaine.\n"
                 "Essaie `/search jepa` ou `/search transformer`.")
         else:
             lines = ["🧠 *Deep Learning & modèles — 7 derniers jours*\n"]
@@ -195,13 +200,13 @@ def telegram():
     # ── /search [terme] ────────────────────────────────────────────────────
     elif text.startswith("/search "):
         query = text[8:].strip()
+        p = f"%{query}%"
         rows = db_query("""
             SELECT title, source, importance, summary, url FROM articles
-            WHERE (title ILIKE %s OR summary ILIKE %s
-                   OR %s = ANY(tags) OR %s = ANY(technologies))
+            WHERE (title ILIKE %s OR summary ILIKE %s)
               AND collected_at > NOW() - INTERVAL '30 days'
             ORDER BY importance DESC LIMIT 6
-        """, (f"%{query}%", f"%{query}%", query.lower(), query.lower()))
+        """, (p, p))
         if not rows:
             send_tg(chat_id, f"Aucun résultat pour *{query}* (30 derniers jours).")
         else:
@@ -220,11 +225,13 @@ def telegram():
                 COUNT(*) AS total,
                 COUNT(*) FILTER (WHERE importance >= 4) AS critiques,
                 COUNT(*) FILTER (WHERE collected_at > NOW() - INTERVAL '24h') AS auj,
-                COUNT(*) FILTER (WHERE category IN ('Deep Learning','LLM','Paper','JEPA')
-                                   OR 'deep-learning' = ANY(tags)) AS dl_papers,
-                COUNT(*) FILTER (WHERE 'service-surveillé' = ANY(tags)
-                                   OR source ILIKE '%github%'
-                                   OR source ILIKE '%docker%') AS services
+                COUNT(*) FILTER (WHERE category IN (
+                    'Deep Learning','LLM','Paper','JEPA','Open Source AI'
+                )) AS dl_papers,
+                COUNT(*) FILTER (WHERE
+                    source ILIKE '%github%' OR source ILIKE '%docker%'
+                    OR source ILIKE '%anssi%' OR source ILIKE '%cert%'
+                ) AS services
             FROM articles
         """)
         r = rows[0]
@@ -239,29 +246,22 @@ def telegram():
     # ── Question libre ─────────────────────────────────────────────────────
     else:
         question = text
-
-        # Recherche élargie : titre, résumé, technique, tags, technologies
+        p = f"%{question}%"
         rows = db_query("""
             SELECT title, source, summary, technique, cve, cvss,
                    versions_affectees, actions, url, category
             FROM articles
-            WHERE (
-                title       ILIKE %s
-                OR summary  ILIKE %s
-                OR technique ILIKE %s
-                OR tags::text ILIKE %s
-                OR technologies::text ILIKE %s
-            )
+            WHERE (title ILIKE %s OR summary ILIKE %s OR technique ILIKE %s)
             AND collected_at > NOW() - INTERVAL '30 days'
             ORDER BY importance DESC, collected_at DESC
             LIMIT 5
-        """, (f"%{question}%",) * 5)
+        """, (p, p, p))
 
         if not rows:
             send_tg(chat_id,
-                f"Aucun article trouvé pour _\"{question}\"_ dans les 30 derniers jours.\n"
-                f"Essaie `/search {question}` ou reformule le terme clé.")
-            return "OK", 200
+                f"Aucun article trouvé pour _\"{question}\"_.\n"
+                f"Essaie `/search {question}` ou reformule.")
+            return
 
         contexte = "\n\n".join([
             f"Titre : {a['title']} ({a['source']})\n"
@@ -274,32 +274,29 @@ def telegram():
             for a in rows
         ])
 
-        # Prompt adapté selon le type de question
-        is_security_q = any(kw in question.lower() for kw in [
-            "faille", "cve", "exploit", "vuln", "patch", "ransomware", "apt",
-            "attaque", "malware", "zero-day", "breach", "hack"
+        is_security = any(kw in question.lower() for kw in [
+            "faille","cve","exploit","vuln","patch","ransomware",
+            "apt","attaque","malware","zero-day","breach","hack"
         ])
-        is_dl_q = any(kw in question.lower() for kw in [
-            "jepa", "transformer", "llm", "diffusion", "neural", "deep learning",
-            "modèle", "paper", "architecture", "entraîn", "fine-tun"
+        is_dl = any(kw in question.lower() for kw in [
+            "jepa","transformer","llm","diffusion","neural","deep learning",
+            "modele","modèle","paper","architecture","fine-tun"
         ])
 
-        if is_security_q:
+        if is_security:
             instruction = (
-                "Si c'est une faille, explique : le type de vulnérabilité, "
-                "comment elle fonctionne, comment l'exploiter, et comment s'en protéger. "
-                "Sois précis et actionnable."
+                "Explique : le type de vulnérabilité, comment elle fonctionne, "
+                "comment l'exploiter, et comment s'en protéger. Sois précis et actionnable."
             )
-        elif is_dl_q:
+        elif is_dl:
             instruction = (
-                "Si c'est une architecture ou un paper de deep learning, explique : "
-                "le principe, l'innovation par rapport à l'existant, les résultats clés, "
-                "et les cas d'usage pratiques. Sois pédagogue et précis."
+                "Explique : le principe, l'innovation par rapport à l'existant, "
+                "les résultats clés, et les cas d'usage pratiques."
             )
         else:
             instruction = (
-                "Réponds de façon claire et technique. "
-                "Explique les points clés, l'impact, et les actions recommandées si pertinent."
+                "Explique les points clés, l'impact, "
+                "et les actions recommandées si pertinent."
             )
 
         prompt = (
@@ -309,25 +306,17 @@ def telegram():
             f"{instruction} Maximum 400 mots. Réponds en français."
         )
 
-        try:
-            resp = requests.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers={"Authorization": f"Bearer {GROQ_API_KEY}",
-                         "Content-Type": "application/json"},
-                json={
-                    "model":       "llama-3.3-70b-versatile",
-                    "messages":    [{"role": "user", "content": prompt}],
-                    "max_tokens":  800,
-                    "temperature": 0.3,
-                },
-                timeout=30,
-            )
-            answer = resp.json()["choices"][0]["message"]["content"]
-            send_tg(chat_id, f"🤖 *{question}*\n\n{answer}")
-        except Exception as e:
-            send_tg(chat_id, f"⚠️ Erreur lors de la réponse : {e}")
-
-    return "OK", 200
+        resp = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {GROQ_API_KEY}",
+                     "Content-Type": "application/json"},
+            json={"model": "llama-3.3-70b-versatile",
+                  "messages": [{"role": "user", "content": prompt}],
+                  "max_tokens": 800, "temperature": 0.3},
+            timeout=30,
+        )
+        answer = resp.json()["choices"][0]["message"]["content"]
+        send_tg(chat_id, f"🤖 *{question}*\n\n{answer}")
 
 
 # ─── Dashboard web ────────────────────────────────────────────────────────────
@@ -382,8 +371,7 @@ def index():
     let all = [];
     const DL_CATS = ['Deep Learning','LLM','Paper','Open Source AI','Agent IA','JEPA'];
     const SVC_KW  = ['github','docker','spotify','gmail','snapchat','exegol',
-                      'kubernetes','anssi','france connect'];
-
+                     'kubernetes','anssi','france connect'];
     async function load() {
       try {
         const r = await fetch('/api/articles');
@@ -393,7 +381,6 @@ def index():
         document.getElementById('loading').textContent = 'Erreur : ' + e;
       }
     }
-
     function doFilter(f, btn) {
       document.querySelectorAll('.btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
@@ -405,9 +392,8 @@ def index():
       if (f === 'services')    return render(all.filter(a =>
         SVC_KW.some(k => (a.title||'').toLowerCase().includes(k)) ||
         SVC_KW.some(k => (a.source||'').toLowerCase().includes(k))));
-      render(all.filter(a => (a.category || '').includes(f)));
+      render(all.filter(a => (a.category||'').includes(f)));
     }
-
     function render(articles) {
       document.getElementById('loading').style.display = 'none';
       document.getElementById('articles').innerHTML = articles.length
@@ -417,8 +403,8 @@ def index():
                    style="color:inherit;text-decoration:none">${a.title}</a></h3>
             <p>${a.summary || ''}</p>
             <div class="meta">
-              <span class="badge">${a.source || ''}</span>
-              <span class="badge">${a.category || ''}</span>
+              <span class="badge">${a.source||''}</span>
+              <span class="badge">${a.category||''}</span>
               <span class="badge">&#x2605; ${a.importance}/5</span>
               ${a.cve ? `<span class="badge cve">${a.cve}</span>` : ''}
               <span style="float:right">
@@ -428,7 +414,6 @@ def index():
           </div>`).join('')
         : '<p style="text-align:center;padding:2rem;color:#555">Aucun article</p>';
     }
-
     load();
   </script>
 </body>
