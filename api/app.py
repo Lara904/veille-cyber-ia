@@ -181,8 +181,80 @@ def telegram():
 
 @app.route('/')
 def index():
-    try:
-        with open('public/index.html', 'r') as f:
-            return f.read(), 200, {'Content-Type': 'text/html; charset=utf-8'}
-    except FileNotFoundError:
-        return "Dashboard non trouvé", 404
+    return """<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Veille Cyber & IA</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #0f0f0f; color: #e0e0e0; }
+    header { background: #1a1a2e; padding: 1rem; text-align: center; }
+    header h1 { color: #7f77dd; font-size: 1.2rem; }
+    .filters { display: flex; gap: .5rem; padding: 1rem; overflow-x: auto; }
+    .btn { padding: .4rem .8rem; border-radius: 20px; border: 1px solid #333;
+           background: #222; color: #aaa; cursor: pointer; white-space: nowrap; font-size: .85rem; }
+    .btn.active { background: #7f77dd; color: #fff; border-color: #7f77dd; }
+    #articles { padding: 0 1rem 1rem; }
+    .card { background: #1a1a1a; border-radius: 10px; padding: 1rem; margin-bottom: .8rem;
+            border-left: 3px solid #333; }
+    .card[data-imp="5"] { border-left-color: #e24b4a; }
+    .card[data-imp="4"] { border-left-color: #ef9f27; }
+    .card[data-imp="3"] { border-left-color: #7f77dd; }
+    .card h3 { font-size: .95rem; margin-bottom: .4rem; }
+    .card p  { font-size: .82rem; color: #999; line-height: 1.5; }
+    .meta    { font-size: .75rem; color: #555; margin-top: .4rem; }
+    .badge   { display: inline-block; padding: 2px 8px; border-radius: 10px;
+               font-size: .7rem; background: #2a2a2a; color: #777; margin-right: 4px; }
+    #loading { text-align: center; padding: 2rem; color: #555; }
+  </style>
+</head>
+<body>
+  <header><h1>&#x1F50D; Veille Cyber &amp; IA</h1></header>
+  <div class="filters">
+    <button class="btn active" onclick="doFilter('all',this)">Tout</button>
+    <button class="btn" onclick="doFilter('critique',this)">&#x1F525; Critiques</button>
+    <button class="btn" onclick="doFilter('Cyber',this)">&#x1F6E1; Cyber</button>
+    <button class="btn" onclick="doFilter('IA',this)">&#x1F916; IA</button>
+    <button class="btn" onclick="doFilter('CVE',this)">CVE</button>
+  </div>
+  <div id="loading">Chargement...</div>
+  <div id="articles"></div>
+  <script>
+    let all = [];
+    async function load() {
+      try {
+        const r = await fetch('/api/articles');
+        all = await r.json();
+        render(all);
+      } catch(e) {
+        document.getElementById('loading').textContent = 'Erreur : ' + e;
+      }
+    }
+    function doFilter(f, btn) {
+      document.querySelectorAll('.btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      if (f === 'all')      return render(all);
+      if (f === 'critique') return render(all.filter(a => a.importance >= 4));
+      render(all.filter(a => (a.category || '').includes(f)));
+    }
+    function render(articles) {
+      document.getElementById('loading').style.display = 'none';
+      document.getElementById('articles').innerHTML = articles.length ? articles.map(a => `
+        <div class="card" data-imp="${a.importance}">
+          <h3><a href="${a.url}" target="_blank" style="color:inherit;text-decoration:none">${a.title}</a></h3>
+          <p>${a.summary || ''}</p>
+          <div class="meta">
+            <span class="badge">${a.source || ''}</span>
+            <span class="badge">${a.category || ''}</span>
+            <span class="badge">&#x2605; ${a.importance}/5</span>
+            <span style="float:right">${new Date(a.collected_at).toLocaleDateString('fr-FR')}</span>
+          </div>
+        </div>`).join('') :
+        '<p style="text-align:center;padding:2rem;color:#555">Aucun article</p>';
+    }
+    load();
+  </script>
+</body>
+</html>""", 200, {'Content-Type': 'text/html; charset=utf-8'}
