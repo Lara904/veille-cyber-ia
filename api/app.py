@@ -225,9 +225,9 @@ def _handle(chat_id, text):
                 COUNT(*) AS total,
                 COUNT(*) FILTER (WHERE importance >= 4) AS critiques,
                 COUNT(*) FILTER (WHERE collected_at > NOW() - INTERVAL '24h') AS auj,
-                COUNT(*) FILTER (WHERE category IN (
-                    'Deep Learning','LLM','Paper','JEPA','Open Source AI'
-                )) AS dl_papers,
+                COUNT(*) FILTER (WHERE category ILIKE '%deep%'
+                    OR category ILIKE '%llm%' OR category ILIKE '%paper%'
+                    OR category ILIKE '%jepa%') AS dl_papers,
                 COUNT(*) FILTER (WHERE
                     source ILIKE '%github%' OR source ILIKE '%docker%'
                     OR source ILIKE '%anssi%' OR source ILIKE '%cert%'
