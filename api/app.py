@@ -135,13 +135,13 @@ def _handle(chat_id, text):
             FROM articles
             WHERE (
                 title ILIKE ANY(ARRAY[
-                    '%github%','%docker%','%spotify%','%gmail%','%google%',
-                    '%snapchat%','%snap%','%exegol%','%kubernetes%','%gitlab%',
-                    '%france connect%','%ameli%','%impots%','%anssi%','%gouv.fr%',
-                    '%service-public%'
+                    '%%github%%','%%docker%%','%%spotify%%','%%gmail%%','%%google%%',
+                    '%%snapchat%%','%%snap%%','%%exegol%%','%%kubernetes%%','%%gitlab%%',
+                    '%%france connect%%','%%ameli%%','%%impots%%','%%anssi%%','%%gouv.fr%%',
+                    '%%service-public%%'
                 ])
                 OR source ILIKE ANY(ARRAY[
-                    '%github%','%docker%','%spotify%','%snap%','%anssi%','%cert%'
+                    '%%github%%','%%docker%%','%%spotify%%','%%snap%%','%%anssi%%','%%cert%%'
                 ])
             )
             AND collected_at > NOW() - INTERVAL '7 days'
@@ -168,15 +168,15 @@ def _handle(chat_id, text):
             WHERE (
                 category IN ('Deep Learning','LLM','Paper','Open Source AI','Agent IA','JEPA')
                 OR title ILIKE ANY(ARRAY[
-                    '%deep learning%','%neural network%','%transformer%',
-                    '%jepa%','%diffusion%','%llm%','%foundation model%',
-                    '%self-supervised%','%world model%','%mamba%','%ssm%',
-                    '%mixture of experts%','%moe%','%rlhf%','%fine-tun%',
-                    '%multimodal%','%embedding%','%lora%','%qlora%'
+                    '%%deep learning%%','%%neural network%%','%%transformer%%',
+                    '%%jepa%%','%%diffusion%%','%%llm%%','%%foundation model%%',
+                    '%%self-supervised%%','%%world model%%','%%mamba%%','%%ssm%%',
+                    '%%mixture of experts%%','%%moe%%','%%rlhf%%','%%fine-tun%%',
+                    '%%multimodal%%','%%embedding%%','%%lora%%','%%qlora%%'
                 ])
                 OR source ILIKE ANY(ARRAY[
-                    '%arxiv%','%papers with code%','%distill%','%gradient%',
-                    '%deepmind%','%meta ai%','%huggingface%'
+                    '%%arxiv%%','%%papers with code%%','%%distill%%','%%gradient%%',
+                    '%%deepmind%%','%%meta ai%%','%%huggingface%%'
                 ])
             )
             AND collected_at > NOW() - INTERVAL '7 days'
@@ -225,12 +225,13 @@ def _handle(chat_id, text):
                 COUNT(*) AS total,
                 COUNT(*) FILTER (WHERE importance >= 4) AS critiques,
                 COUNT(*) FILTER (WHERE collected_at > NOW() - INTERVAL '24h') AS auj,
-                COUNT(*) FILTER (WHERE category ILIKE '%deep%'
-                    OR category ILIKE '%llm%' OR category ILIKE '%paper%'
-                    OR category ILIKE '%jepa%') AS dl_papers,
                 COUNT(*) FILTER (WHERE
-                    source ILIKE '%github%' OR source ILIKE '%docker%'
-                    OR source ILIKE '%anssi%' OR source ILIKE '%cert%'
+                    category ILIKE '%%deep%%' OR category ILIKE '%%llm%%'
+                    OR category ILIKE '%%paper%%' OR category ILIKE '%%jepa%%'
+                ) AS dl_papers,
+                COUNT(*) FILTER (WHERE
+                    source ILIKE '%%github%%' OR source ILIKE '%%docker%%'
+                    OR source ILIKE '%%anssi%%' OR source ILIKE '%%cert%%'
                 ) AS services
             FROM articles
         """)
