@@ -311,7 +311,7 @@ def _handle(chat_id, text):
             "https://api.groq.com/openai/v1/chat/completions",
             headers={"Authorization": f"Bearer {GROQ_API_KEY}",
                      "Content-Type": "application/json"},
-            json={"model": "llama-3.3-70b-versatile",
+            json={"model": "openai/gpt-oss-120b",
                   "messages": [{"role": "user", "content": prompt}],
                   "max_tokens": 800, "temperature": 0.3},
             timeout=30,
