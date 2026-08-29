@@ -19,7 +19,7 @@ TELEGRAM_CHAT_ID     = os.environ["TELEGRAM_CHAT_ID"]
 
 GROQ_MODEL_FAST      = "openai/gpt-oss-20b" # 14 400 req/jour
 GROQ_URL             = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_DELAY_SECONDS   = 2.5  # Respect des 30 req/min
+GROQ_DELAY_SECONDS   = 4.0  # Respect des 30 req/min
 
 # ─── Flux RSS par domaine ─────────────────────────────────────────────────────
 
@@ -47,26 +47,39 @@ RSS_FEEDS = {
         ("LeMagIT Sécu",      "https://www.lemagit.fr/rss/Security.xml"),
     ],
     "IA": [
-        # ── Sources existantes ──────────────────────────────────────────────
-        ("Anthropic",         "https://www.anthropic.com/rss.xml"),
-        ("OpenAI",            "https://openai.com/blog/rss.xml"),
-        ("HuggingFace",       "https://huggingface.co/blog/feed.xml"),
-        ("DeepMind",          "https://deepmind.google/blog/rss.xml"),
-        ("arXiv cs.AI",       "https://arxiv.org/rss/cs.AI"),
-        ("arXiv cs.CR",       "https://arxiv.org/rss/cs.CR"),
-        ("Papers With Code",  "https://paperswithcode.com/latest/rss"),
-        ("AI News",           "https://www.artificialintelligence-news.com/feed/"),
-        # ── Deep Learning & recherche fondamentale ──────────────────────────
-        ("arXiv cs.LG",       "https://arxiv.org/rss/cs.LG"),   # Machine Learning
-        ("arXiv cs.NE",       "https://arxiv.org/rss/cs.NE"),   # Neural & Evolutionary
-        ("arXiv cs.CV",       "https://arxiv.org/rss/cs.CV"),   # Computer Vision
-        ("arXiv cs.CL",       "https://arxiv.org/rss/cs.CL"),   # NLP / LLMs
-        ("Distill.pub",       "https://distill.pub/rss.xml"),
-        ("The Gradient",      "https://thegradient.pub/rss/"),
-        ("ML Safety",         "https://www.mlsafety.org/rss"),
-        ("Yann LeCun Blog",   "https://yann.lecun.com/ex/rss.xml"),
-        ("Meta AI",           "https://ai.meta.com/blog/rss/"),
-        ("Yannic Kilcher",    "https://www.ykilcher.com/feed.xml"),
+            # ── Labs officiels ───────────────────────────────────────────────────
+        ("OpenAI News",        "https://openai.com/news/rss.xml"),
+        ("Anthropic News",     "https://rsshub.bestblogs.dev/anthropic/news"),
+        ("Anthropic Research", "https://rsshub.bestblogs.dev/anthropic/research"),
+        ("Google DeepMind",    "https://deepmind.google/blog/feed/basic/"),
+        ("Google Research",    "https://research.google/blog/rss/"),
+        ("Meta AI",            "https://ai.meta.com/blog/rss/"),
+        ("Mistral AI",         "https://mistral.ai/news/rss/"),
+        ("Microsoft Research", "https://www.microsoft.com/en-us/research/feed/"),
+        ("Apple ML Research",  "https://machinelearning.apple.com/rss.xml"),
+        ("HuggingFace Blog",   "https://huggingface.co/blog/feed.xml"),
+        ("HuggingFace Papers", "https://huggingface.co/papers/rss.xml"),
+    
+        # ── arXiv — URLs corrigées ───────────────────────────────────────────
+        ("arXiv cs.AI",        "https://rss.arxiv.org/rss/cs.AI"),
+        ("arXiv cs.LG",        "https://rss.arxiv.org/rss/cs.LG"),
+        ("arXiv cs.CL",        "https://rss.arxiv.org/rss/cs.CL"),
+        ("arXiv cs.CV",        "https://rss.arxiv.org/rss/cs.CV"),
+        ("arXiv cs.CR",        "https://rss.arxiv.org/rss/cs.CR"),
+    
+        # ── Actu IA généraliste ──────────────────────────────────────────────
+        ("The Verge AI",       "https://www.theverge.com/ai-artificial-intelligence/rss/index.xml"),
+        ("TechCrunch AI",      "https://techcrunch.com/category/artificial-intelligence/feed/"),
+        ("VentureBeat AI",     "https://venturebeat.com/category/ai/feed/"),
+        ("MIT Tech Review AI", "https://www.technologyreview.com/topic/artificial-intelligence/feed/"),
+        ("AI News",            "https://www.artificialintelligence-news.com/feed/"),
+    
+        # ── Blogs techniques influents ───────────────────────────────────────
+        ("Simon Willison",     "https://simonwillison.net/atom/everything/"),
+        ("Latent Space",       "https://www.latent.space/feed"),
+        ("The Gradient",       "https://thegradient.pub/rss/"),
+        ("Papers With Code",   "https://paperswithcode.com/latest/rss"),
+        ("Distill.pub",        "https://distill.pub/rss.xml"),
     ],
     # ── Nouvelle catégorie : services & plateformes ──────────────────────────
     "Services": [
@@ -111,7 +124,8 @@ DL_KEYWORDS = [
 
 # ─── Prompt d'analyse ─────────────────────────────────────────────────────────
 
-PROMPT_TEMPLATE = """Tu es un expert en cybersécurité et IA. Analyse cet article.
+PROMPT_TEMPLATE = """Réponds UNIQUEMENT avec le JSON ci-dessous, sans texte avant ou après, sans markdown, sans explication. Le JSON doit être complet et fermé.
+Tu es un expert en cybersécurité et IA. Analyse cet article.
 Réponds UNIQUEMENT avec un JSON valide, sans texte avant ou après.
 
 {{
@@ -215,7 +229,7 @@ def analyze_with_groq(title: str, source: str, content: str) -> dict:
         json={
             "model": GROQ_MODEL_FAST,
             "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": 600,
+            "max_tokens": 800,
             "temperature": 0.1,
         },
         timeout=30,
@@ -223,7 +237,6 @@ def analyze_with_groq(title: str, source: str, content: str) -> dict:
     response.raise_for_status()
     raw = response.json()["choices"][0]["message"]["content"]
     return extract_json(raw)
-
 
 def send_telegram(message: str):
     """Envoie un message Telegram (gère les messages > 4096 caractères)"""
@@ -283,7 +296,8 @@ def main():
         for source_name, feed_url in feeds:
             try:
                 feed    = feedparser.parse(feed_url, request_headers={"User-Agent": "Mozilla/5.0"})
-                entries = feed.entries[:12]
+                limit = 20 if "arxiv" in feed_url.lower() else 12
+                entries = feed.entries[:limit]
                 print(f"  {source_name}: {len(entries)} entrées")
 
                 for entry in entries:
@@ -309,6 +323,8 @@ def main():
                         error_count += 1
                         time.sleep(GROQ_DELAY_SECONDS)
                         continue
+                    if source_name.startswith("arXiv") and analysis.get("importance", 1) < 3:
+                        analysis["importance"] = 3
 
                     # Surclasser en Services si le flag est actif
                     if service_flag and domain == "Cyber":
