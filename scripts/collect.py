@@ -4,11 +4,13 @@ Collecteur de veille Cyber & IA
 Exécuté par GitHub Actions toutes les 4 heures
 """
 
-import os, json, time, re
+import os, json, time, re, socket
 import feedparser
 import psycopg2
 import requests
 from datetime import datetime, timezone
+
+socket.setdefaulttimeout(15)  # Empêche un flux RSS muet de bloquer le script indéfiniment
 
 # ─── Configuration ────────────────────────────────────────────────────────────
 
