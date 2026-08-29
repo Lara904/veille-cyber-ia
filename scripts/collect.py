@@ -25,6 +25,11 @@ GROQ_DELAY_SECONDS   = 15.0  # Respect du TPM (8 000 tokens/min), pas seulement 
 GROQ_MAX_TOKENS      = 600
 
 MAX_ARTICLES_PER_RUN = 60  # Sécurité : ~15 min avec le délai de 15s, sous le timeout du workflow (30 min)
+QUOTA_PAR_DOMAINE = {
+    "Cyber":    28,
+    "IA":       28,
+    "Services":  4,
+}
 
 # ─── Flux RSS par domaine ─────────────────────────────────────────────────────
 
@@ -363,21 +368,22 @@ def main():
     new_count             = 0
     error_count           = 0
     critical_alerts       = []
-    articles_traites_run  = 0
     quota_exhausted       = False
+
+    max_par_domaine = MAX_ARTICLES_PER_RUN // len(RSS_FEEDS)
+    print(f"Quota : {max_par_domaine} articles max par domaine ({', '.join(RSS_FEEDS.keys())})")
 
     for domain, feeds in RSS_FEEDS.items():
         if quota_exhausted:
             break
 
         print(f"\n[{domain}]")
-
-        if articles_traites_run >= MAX_ARTICLES_PER_RUN:
-            print(f"  ⏸ Limite de {MAX_ARTICLES_PER_RUN} articles/run déjà atteinte, domaine ignoré.")
-            continue
+        articles_traites_domaine = 0
 
         for source_name, feed_url in feeds:
-            if quota_exhausted or articles_traites_run >= MAX_ARTICLES_PER_RUN:
+            if quota_exhausted or articles_traites_domaine >= max_par_domaine:
+                if articles_traites_domaine >= max_par_domaine:
+                    print(f"  ⏸ Quota du domaine {domain} atteint ({max_par_domaine}), sources restantes ignorées.")
                 break
 
             try:
@@ -387,8 +393,7 @@ def main():
                 print(f"  {source_name}: {len(entries)} entrées")
 
                 for entry in entries:
-                    if articles_traites_run >= MAX_ARTICLES_PER_RUN:
-                        print(f"    ⏸ Limite de {MAX_ARTICLES_PER_RUN} articles/run atteinte, arrêt.")
+                    if quota_exhausted or articles_traites_domaine >= max_par_domaine:
                         break
 
                     url   = getattr(entry, "link", None)
@@ -449,7 +454,7 @@ def main():
 
                     insert_article(conn, article_data)
                     new_count += 1
-                    articles_traites_run += 1
+                    articles_traites_domaine += 1
                     imp = analysis.get("importance", 1)
                     print(f"    ✓ [{imp}/5] {title[:60]}")
 
