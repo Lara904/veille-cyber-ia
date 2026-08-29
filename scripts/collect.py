@@ -17,7 +17,7 @@ DATABASE_URL         = os.environ["DATABASE_URL"]
 TELEGRAM_BOT_TOKEN   = os.environ["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_CHAT_ID     = os.environ["TELEGRAM_CHAT_ID"]
 
-GROQ_MODEL_FAST      = "llama-3.1-8b-instant"   # 14 400 req/jour
+GROQ_MODEL_FAST      = "openai/gpt-oss-20b" # 14 400 req/jour
 GROQ_URL             = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_DELAY_SECONDS   = 2.5  # Respect des 30 req/min
 
