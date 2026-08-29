@@ -17,9 +17,12 @@ DATABASE_URL         = os.environ["DATABASE_URL"]
 TELEGRAM_BOT_TOKEN   = os.environ["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_CHAT_ID     = os.environ["TELEGRAM_CHAT_ID"]
 
-GROQ_MODEL_FAST      = "openai/gpt-oss-20b" # 14 400 req/jour
+GROQ_MODEL_FAST      = "openai/gpt-oss-20b"  # Free tier : 30 RPM, 8 000 TPM, 200 000 TPD
 GROQ_URL             = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_DELAY_SECONDS   = 4.0  # Respect des 30 req/min
+GROQ_DELAY_SECONDS   = 15.0  # Respect du TPM (8 000 tokens/min), pas seulement du RPM
+GROQ_MAX_TOKENS      = 600
+
+MAX_ARTICLES_PER_RUN = 60  # Sécurité : ~15 min avec le délai de 15s, sous le timeout du workflow (30 min)
 
 # ─── Flux RSS par domaine ─────────────────────────────────────────────────────
 
@@ -47,7 +50,7 @@ RSS_FEEDS = {
         ("LeMagIT Sécu",      "https://www.lemagit.fr/rss/Security.xml"),
     ],
     "IA": [
-            # ── Labs officiels ───────────────────────────────────────────────────
+        # ── Labs officiels ───────────────────────────────────────────────────
         ("OpenAI News",        "https://openai.com/news/rss.xml"),
         ("Anthropic News",     "https://rsshub.bestblogs.dev/anthropic/news"),
         ("Anthropic Research", "https://rsshub.bestblogs.dev/anthropic/research"),
@@ -59,21 +62,21 @@ RSS_FEEDS = {
         ("Apple ML Research",  "https://machinelearning.apple.com/rss.xml"),
         ("HuggingFace Blog",   "https://huggingface.co/blog/feed.xml"),
         ("HuggingFace Papers", "https://huggingface.co/papers/rss.xml"),
-    
+
         # ── arXiv — URLs corrigées ───────────────────────────────────────────
         ("arXiv cs.AI",        "https://rss.arxiv.org/rss/cs.AI"),
         ("arXiv cs.LG",        "https://rss.arxiv.org/rss/cs.LG"),
         ("arXiv cs.CL",        "https://rss.arxiv.org/rss/cs.CL"),
         ("arXiv cs.CV",        "https://rss.arxiv.org/rss/cs.CV"),
         ("arXiv cs.CR",        "https://rss.arxiv.org/rss/cs.CR"),
-    
+
         # ── Actu IA généraliste ──────────────────────────────────────────────
         ("The Verge AI",       "https://www.theverge.com/ai-artificial-intelligence/rss/index.xml"),
         ("TechCrunch AI",      "https://techcrunch.com/category/artificial-intelligence/feed/"),
         ("VentureBeat AI",     "https://venturebeat.com/category/ai/feed/"),
         ("MIT Tech Review AI", "https://www.technologyreview.com/topic/artificial-intelligence/feed/"),
         ("AI News",            "https://www.artificialintelligence-news.com/feed/"),
-    
+
         # ── Blogs techniques influents ───────────────────────────────────────
         ("Simon Willison",     "https://simonwillison.net/atom/everything/"),
         ("Latent Space",       "https://www.latent.space/feed"),
@@ -129,8 +132,8 @@ Tu es un expert en cybersécurité et IA. Analyse cet article.
 Réponds UNIQUEMENT avec un JSON valide, sans texte avant ou après.
 
 {{
-  "resume": "Décris : QUI est vulnérable / concerné, QUOI se passe techniquement (vecteur, mécanisme, type de vulnérabilité ou avancée technique), et QUEL est l'impact concret",
-  "technique": "Pour les failles : type de vulnérabilité, condition d'exploitation, privilèges requis, interaction utilisateur. Pour le DL : architecture, méthode, benchmark. Null si non applicable.",
+  "resume": "Décris en 2-3 phrases MAX : QUI est vulnérable / concerné, QUOI se passe techniquement (vecteur, mécanisme, type de vulnérabilité ou avancée technique), et QUEL est l'impact concret",
+  "technique": "Pour les failles : type de vulnérabilité, condition d'exploitation, privilèges requis, interaction utilisateur. Pour le DL : architecture, méthode, benchmark. Sois concis (1-2 phrases). Null si non applicable.",
   "cve": "CVE-XXXX-XXXX si mentionné, sinon null",
   "cvss": "Score numérique CVSS si mentionné, sinon null",
   "versions_affectees": "Produits, versions ou modèles concernés, sinon null",
@@ -138,7 +141,7 @@ Réponds UNIQUEMENT avec un JSON valide, sans texte avant ou après.
   "categorie": "CVE|Zero-Day|Threat Intel|Ransomware|APT|Cloud Security|LLM|Deep Learning|JEPA|Open Source AI|Agent IA|Paper|Outil|Réglementation|Services|Autre",
   "technologies": ["tech1"],
   "tags": ["tag1", "tag2"],
-  "actions": "Action concrète (patcher, mettre à jour, surveiller, lire le paper...) ou null"
+  "actions": "Action concrète et courte (patcher, mettre à jour, surveiller, lire le paper...) ou null"
 }}
 
 Importance : 1=info, 2=intéressant, 3=important, 4=critique, 5=alerte max (CVSS≥9, 0-day actif, breach majeur)
@@ -213,14 +216,9 @@ def extract_json(text: str) -> dict:
     raise ValueError(f"JSON introuvable dans : {text[:300]}")
 
 
-def analyze_with_groq(title: str, source: str, content: str) -> dict:
-    """Appelle Groq pour analyser un article"""
-    prompt = PROMPT_TEMPLATE.format(
-        title=title,
-        source=source,
-        content=content[:3000],
-    )
-    response = requests.post(
+def _call_groq(prompt: str):
+    """Un seul appel HTTP à Groq, retourne l'objet response brut"""
+    return requests.post(
         GROQ_URL,
         headers={
             "Authorization": f"Bearer {GROQ_API_KEY}",
@@ -229,14 +227,41 @@ def analyze_with_groq(title: str, source: str, content: str) -> dict:
         json={
             "model": GROQ_MODEL_FAST,
             "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": 800,
+            "max_tokens": GROQ_MAX_TOKENS,
             "temperature": 0.1,
         },
         timeout=30,
     )
+
+
+def analyze_with_groq(title: str, source: str, content: str) -> dict:
+    """Appelle Groq pour analyser un article, avec retry sur 429 et détection de troncature"""
+    prompt = PROMPT_TEMPLATE.format(
+        title=title,
+        source=source,
+        content=content[:1500],
+    )
+
+    response = _call_groq(prompt)
+
+    if response.status_code == 429:
+        retry_after = int(response.headers.get("retry-after", 20))
+        print(f"    ⏳ Rate limit (TPM), attente {retry_after}s...")
+        time.sleep(retry_after)
+        response = _call_groq(prompt)  # un seul retry
+
     response.raise_for_status()
-    raw = response.json()["choices"][0]["message"]["content"]
+    data = response.json()
+
+    choice = data["choices"][0]
+    finish_reason = choice.get("finish_reason")
+    raw = choice["message"]["content"]
+
+    if finish_reason == "length":
+        raise ValueError("Réponse tronquée par max_tokens (finish_reason=length)")
+
     return extract_json(raw)
+
 
 def send_telegram(message: str):
     """Envoie un message Telegram (gère les messages > 4096 caractères)"""
@@ -286,21 +311,33 @@ def main():
     print(f"{'='*50}")
 
     conn = get_db()
-    new_count     = 0
-    error_count   = 0
-    critical_alerts = []
+    new_count             = 0
+    error_count           = 0
+    critical_alerts       = []
+    articles_traites_run  = 0
 
     for domain, feeds in RSS_FEEDS.items():
         print(f"\n[{domain}]")
 
+        if articles_traites_run >= MAX_ARTICLES_PER_RUN:
+            print(f"  ⏸ Limite de {MAX_ARTICLES_PER_RUN} articles/run déjà atteinte, domaine ignoré.")
+            continue
+
         for source_name, feed_url in feeds:
+            if articles_traites_run >= MAX_ARTICLES_PER_RUN:
+                break
+
             try:
                 feed    = feedparser.parse(feed_url, request_headers={"User-Agent": "Mozilla/5.0"})
-                limit = 20 if "arxiv" in feed_url.lower() else 12
+                limit   = 20 if "arxiv" in feed_url.lower() else 12
                 entries = feed.entries[:limit]
                 print(f"  {source_name}: {len(entries)} entrées")
 
                 for entry in entries:
+                    if articles_traites_run >= MAX_ARTICLES_PER_RUN:
+                        print(f"    ⏸ Limite de {MAX_ARTICLES_PER_RUN} articles/run atteinte, arrêt.")
+                        break
+
                     url   = getattr(entry, "link", None)
                     title = getattr(entry, "title", "Sans titre").strip()
 
@@ -323,6 +360,8 @@ def main():
                         error_count += 1
                         time.sleep(GROQ_DELAY_SECONDS)
                         continue
+
+                    # Boost minimum pour les papers arXiv (souvent sous-notés)
                     if source_name.startswith("arXiv") and analysis.get("importance", 1) < 3:
                         analysis["importance"] = 3
 
@@ -352,6 +391,7 @@ def main():
 
                     insert_article(conn, article_data)
                     new_count += 1
+                    articles_traites_run += 1
                     imp = analysis.get("importance", 1)
                     print(f"    ✓ [{imp}/5] {title[:60]}")
 
