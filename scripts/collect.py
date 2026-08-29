@@ -17,7 +17,7 @@ DATABASE_URL         = os.environ["DATABASE_URL"]
 TELEGRAM_BOT_TOKEN   = os.environ["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_CHAT_ID     = os.environ["TELEGRAM_CHAT_ID"]
 
-GROQ_MODEL_FAST      = "openai/gpt-oss-20b"  # Free tier : 30 RPM, 8 000 TPM, 200 000 TPD
+GROQ_MODEL_FAST      = "qwen/qwen3.8-27b"  # Free tier : 30 RPM, 1K RPD, 8 000 TPM, 2 000 000 TPD (vs 200K pour gpt-oss-20b)
 GROQ_URL             = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_DELAY_SECONDS   = 15.0  # Respect du TPM (8 000 tokens/min), pas seulement du RPM
 GROQ_MAX_TOKENS      = 600
@@ -216,6 +216,29 @@ def extract_json(text: str) -> dict:
     raise ValueError(f"JSON introuvable dans : {text[:300]}")
 
 
+class QuotaExhausted(Exception):
+    """Levée quand le quota journalier (RPD/TPD) Groq est épuisé — inutile de retenter dans ce run."""
+    pass
+
+
+def _parse_reset_duration(s: str):
+    """Parse une durée type '2m59.56s', '45s', '1h2m3s' renvoyée par Groq → secondes (float)."""
+    if not s:
+        return None
+    m = re.fullmatch(r"(?:(\d+)h)?(?:(\d+)m)?(?:([\d.]+)s)?", s.strip())
+    if not m:
+        return None
+    h, mn, sec = m.groups()
+    total = 0.0
+    if h:
+        total += int(h) * 3600
+    if mn:
+        total += int(mn) * 60
+    if sec:
+        total += float(sec)
+    return total if total > 0 else None
+
+
 def _call_groq(prompt: str):
     """Un seul appel HTTP à Groq, retourne l'objet response brut"""
     return requests.post(
@@ -235,7 +258,12 @@ def _call_groq(prompt: str):
 
 
 def analyze_with_groq(title: str, source: str, content: str) -> dict:
-    """Appelle Groq pour analyser un article, avec retry sur 429 et détection de troncature"""
+    """Appelle Groq pour analyser un article, avec retry sur 429 et détection de troncature.
+
+    Distingue un simple dépassement TPM/RPM (courte fenêtre, ~1 min) d'un épuisement
+    du quota journalier RPD/TPD (fenêtre longue) : dans le second cas, on lève
+    QuotaExhausted pour que main() arrête le run au lieu de marteler l'API pendant 10 min.
+    """
     prompt = PROMPT_TEMPLATE.format(
         title=title,
         source=source,
@@ -245,10 +273,26 @@ def analyze_with_groq(title: str, source: str, content: str) -> dict:
     response = _call_groq(prompt)
 
     if response.status_code == 429:
-        retry_after = int(response.headers.get("retry-after", 20))
-        print(f"    ⏳ Rate limit (TPM), attente {retry_after}s...")
+        # Retry-After côté HTTP standard, sinon en-têtes spécifiques Groq
+        wait_req = _parse_reset_duration(response.headers.get("x-ratelimit-reset-requests"))
+        wait_tok = _parse_reset_duration(response.headers.get("x-ratelimit-reset-tokens"))
+        retry_after = wait_req or wait_tok or float(response.headers.get("retry-after", 20))
+
+        # > 90s : c'est presque certainement le quota journalier (RPD/TPD), pas le TPM/RPM.
+        # Retenter ne sert à rien dans le budget de ce run (timeout GitHub Actions = 30 min).
+        if retry_after > 90:
+            raise QuotaExhausted(
+                f"Quota Groq épuisé (reset dans {retry_after:.0f}s ≈ {retry_after/60:.1f} min) — "
+                f"probablement le quota journalier RPD/TPD, pas juste le TPM."
+            )
+
+        print(f"    ⏳ Rate limit (TPM/RPM), attente {retry_after:.0f}s...")
         time.sleep(retry_after)
         response = _call_groq(prompt)  # un seul retry
+
+        if response.status_code == 429:
+            # Toujours bloqué après le retry → on considère aussi que c'est le quota journalier
+            raise QuotaExhausted("Rate limit persistant après retry — quota journalier probable.")
 
     response.raise_for_status()
     data = response.json()
@@ -256,6 +300,9 @@ def analyze_with_groq(title: str, source: str, content: str) -> dict:
     choice = data["choices"][0]
     finish_reason = choice.get("finish_reason")
     raw = choice["message"]["content"]
+
+    if not raw or not raw.strip():
+        raise ValueError("Réponse vide de Groq")
 
     if finish_reason == "length":
         raise ValueError("Réponse tronquée par max_tokens (finish_reason=length)")
@@ -315,8 +362,12 @@ def main():
     error_count           = 0
     critical_alerts       = []
     articles_traites_run  = 0
+    quota_exhausted       = False
 
     for domain, feeds in RSS_FEEDS.items():
+        if quota_exhausted:
+            break
+
         print(f"\n[{domain}]")
 
         if articles_traites_run >= MAX_ARTICLES_PER_RUN:
@@ -324,7 +375,7 @@ def main():
             continue
 
         for source_name, feed_url in feeds:
-            if articles_traites_run >= MAX_ARTICLES_PER_RUN:
+            if quota_exhausted or articles_traites_run >= MAX_ARTICLES_PER_RUN:
                 break
 
             try:
@@ -355,6 +406,11 @@ def main():
 
                     try:
                         analysis = analyze_with_groq(title, source_name, content)
+                    except QuotaExhausted as e:
+                        print(f"    🛑 {e}")
+                        print(f"    🛑 Arrêt du run — quota Groq épuisé, inutile de continuer.")
+                        quota_exhausted = True
+                        break
                     except Exception as e:
                         print(f"    ⚠ Groq error pour '{title[:50]}': {e}")
                         error_count += 1
@@ -403,6 +459,15 @@ def main():
             except Exception as e:
                 print(f"  ✗ Erreur flux {source_name}: {e}")
                 continue
+
+            if quota_exhausted:
+                break
+
+    if quota_exhausted:
+        print(f"\n{'='*50}")
+        print("⚠️  Run interrompu : quota Groq journalier probablement épuisé.")
+        print("   Vérifie https://console.groq.com/settings/limits pour confirmer.")
+        print(f"{'='*50}")
 
     conn.close()
 
