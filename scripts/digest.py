@@ -13,7 +13,7 @@ TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_CHAT_ID   = os.environ["TELEGRAM_CHAT_ID"]
 
 GROQ_URL           = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_MODEL_QUALITY = "openai/gpt-oss-120b"  # 1 seul appel/jour → qualité max
+GROQ_MODEL_QUALITY = "qwen/qwen3.8-27b" # 1 seul appel/jour → qualité max
 
 
 def get_articles_24h() -> list[dict]:
