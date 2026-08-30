@@ -370,13 +370,16 @@ def main():
     critical_alerts       = []
     quota_exhausted       = False
 
-    max_par_domaine = MAX_ARTICLES_PER_RUN // len(RSS_FEEDS)
-    print(f"Quota : {max_par_domaine} articles max par domaine ({', '.join(RSS_FEEDS.keys())})")
+    max_par_domaine_defaut = MAX_ARTICLES_PER_RUN // len(RSS_FEEDS)
+    print(f"Quotas par domaine : " + ", ".join(
+        f"{d}={QUOTA_PAR_DOMAINE.get(d, max_par_domaine_defaut)}" for d in RSS_FEEDS
+    ))
 
     for domain, feeds in RSS_FEEDS.items():
         if quota_exhausted:
             break
 
+        max_par_domaine = QUOTA_PAR_DOMAINE.get(domain, max_par_domaine_defaut)
         print(f"\n[{domain}]")
         articles_traites_domaine = 0
 
