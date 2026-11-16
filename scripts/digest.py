@@ -3,7 +3,7 @@
 Digest quotidien de veille — envoyé sur Telegram à 7h
 """
 
-import os, json, requests
+import os, json, time, requests
 import psycopg2
 from datetime import datetime
 
@@ -101,19 +101,33 @@ def format_digest(articles: list[dict], synthesis: str) -> str:
 
 
 def send_telegram(text: str):
-    """Envoie un message, découpe si > 4096 caractères"""
+    """Envoie un message, découpe si > 4096 caractères.
+
+    Un incident réseau transitoire vers api.telegram.org ne doit pas faire
+    planter le job (cf. le même correctif dans collect.py) : on retente une
+    fois puis on log sans lever d'exception.
+    """
     chunks = [text[i:i+4000] for i in range(0, len(text), 4000)]
     for chunk in chunks:
-        requests.post(
-            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
-            json={
-                "chat_id": TELEGRAM_CHAT_ID,
-                "text": chunk,
-                "parse_mode": "Markdown",
-                "disable_web_page_preview": True,
-            },
-            timeout=15,
-        )
+        for attempt in (1, 2):
+            try:
+                resp = requests.post(
+                    f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+                    json={
+                        "chat_id": TELEGRAM_CHAT_ID,
+                        "text": chunk,
+                        "parse_mode": "Markdown",
+                        "disable_web_page_preview": True,
+                    },
+                    timeout=15,
+                )
+                resp.raise_for_status()
+                break
+            except requests.exceptions.RequestException as e:
+                if attempt == 2:
+                    print(f"⚠ Échec envoi Telegram (abandon après retry) : {e}")
+                else:
+                    time.sleep(3)
 
 
 def main():
