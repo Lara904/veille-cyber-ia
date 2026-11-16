@@ -318,19 +318,34 @@ def analyze_with_groq(title: str, source: str, content: str) -> dict:
 
 
 def send_telegram(message: str):
-    """Envoie un message Telegram (gère les messages > 4096 caractères)"""
+    """Envoie un message Telegram (gère les messages > 4096 caractères).
+
+    Ne doit jamais faire planter le run : un incident réseau transitoire
+    (reset TLS, timeout, etc.) vers api.telegram.org ne doit pas empêcher
+    la collecte déjà effectuée (et déjà commitée en base) d'être considérée
+    comme un succès. On retente une fois, puis on log et on continue.
+    """
     chunks = [message[i:i+4000] for i in range(0, len(message), 4000)]
     for chunk in chunks:
-        requests.post(
-            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
-            json={
-                "chat_id": TELEGRAM_CHAT_ID,
-                "text": chunk,
-                "parse_mode": "Markdown",
-                "disable_web_page_preview": True,
-            },
-            timeout=10,
-        )
+        for attempt in (1, 2):
+            try:
+                resp = requests.post(
+                    f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+                    json={
+                        "chat_id": TELEGRAM_CHAT_ID,
+                        "text": chunk,
+                        "parse_mode": "Markdown",
+                        "disable_web_page_preview": True,
+                    },
+                    timeout=10,
+                )
+                resp.raise_for_status()
+                break
+            except requests.exceptions.RequestException as e:
+                if attempt == 2:
+                    print(f"  ⚠ Échec envoi Telegram (abandon après retry) : {e}")
+                else:
+                    time.sleep(3)
 
 
 def get_article_content(entry) -> str:
